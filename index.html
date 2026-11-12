@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TB-001A 双尾蝎 // TENGDEN FLIGHT TEST HANGAR</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/src/styles/hud.css" />
+  </head>
+  <body>
+    <!-- WebGL2 Viewport -->
+    <div id="canvas-container"></div>
+
+    <!-- Minimalist Aerospace Initialization Screen -->
+    <div id="boot-screen" class="boot-screen">
+      <div class="boot-panel">
+        <div class="boot-meta">
+          <span>TENGDEN AEROSPACE // BAY 10-2</span>
+          <span>TW328-A</span>
+        </div>
+        <h1 class="boot-title">TB-001A <em>双尾蝎</em></h1>
+        <p class="boot-desc">正在编译高精气动曲面、法线蒙皮贴图与机库全局环境光遮蔽...</p>
+        <div class="boot-progress">
+          <div id="boot-bar-fill" class="boot-progress-fill"></div>
+        </div>
+        <div class="boot-foot">
+          <span id="boot-status">INITIALIZING RENDER PIPELINE...</span>
+          <span>JD-1052</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3D Gunsmith Spatial Callout Layer -->
+    <div id="spatial-layer" class="spatial-layer">
+      <svg id="callout-svg" class="callout-svg"></svg>
+      <div id="callout-pins" class="callout-pins"></div>
+    </div>
+
+    <!-- AAA Architectural Tactical Interface -->
+    <div id="hud-root" class="hud-root">
+      <!-- Subtle Optical Frame Fiducials -->
+      <i class="frame-cross tl"></i>
+      <i class="frame-cross tr"></i>
+      <i class="frame-cross bl"></i>
+      <i class="frame-cross br"></i>
+
+      <!-- SLIM ARCHITECTURAL TOP HEADER -->
+      <header class="top-bar">
+        <div class="identity-group">
+          <div class="bay-tag">
+            <span class="live-dot"></span>
+            <span>BAY 10-2</span>
+          </div>
+          <div class="identity-divider"></div>
+          <div class="identity-main">
+            <span class="model-code">TB-001A</span>
+            <span class="model-cn">双尾蝎</span>
+            <span class="serial-tag">JD-1052</span>
+          </div>
+          <div class="identity-specs">
+            <span>SPAN <b>20.0M</b></span>
+            <span class="dot">·</span>
+            <span>MTOW <b id="spec-mtow">3,250KG</b></span>
+            <span class="dot">·</span>
+            <span>PAYLOAD <b id="spec-payload" class="brass-text">12× LIVE</b></span>
+          </div>
+        </div>
+
+        <!-- Optical Lens & Camera Telemetry -->
+        <div class="optics-readout">
+          <span>AZM <b id="hud-azm">314°</b></span>
+          <span class="sep">/</span>
+          <span>ELV <b id="hud-elv">+08°</b></span>
+          <span class="sep">/</span>
+          <span>PRIME <b id="hud-fov">52MM</b></span>
+        </div>
+
+        <!-- Right Architectural Mode Controls -->
+        <div class="top-controls">
+          <div class="seg-group" role="group" aria-label="涂装方案">
+            <span class="seg-label">涂装</span>
+            <button class="seg-btn active" data-livery="airshow" title="珠海航展官方三色涂装">航展三色</button>
+            <button class="seg-btn" data-livery="tactical" title="实战低可视度空军灰涂装">实战低视</button>
+          </div>
+
+          <button id="btn-variant" class="mode-btn" title="切换 TB-001A 三发12弹 / TB-001 双发8弹构型">
+            <span id="label-variant">三发 · 12弹</span>
+          </button>
+
+          <div class="seg-group" role="group" aria-label="机库光影">
+            <span class="seg-label">光影</span>
+            <button class="seg-btn atmo-btn active" data-atmo="daylight" title="自然天光漫射机库">天光</button>
+            <button class="seg-btn atmo-btn" data-atmo="dusk" title="机库大门黄昏逆光">黄昏</button>
+            <button class="seg-btn atmo-btn" data-atmo="inspection" title="高照度机务精检">精检</button>
+          </div>
+
+          <div class="util-group">
+            <button id="btn-info" class="util-btn" title="展开/收起武器挂载详情卡 [I]">参数 <em>I</em></button>
+            <button id="btn-pins" class="util-btn active" title="显示/隐藏部件空间引线 [C]">标注 <em>C</em></button>
+            <button id="btn-audio" class="util-btn" title="开启/关闭机库环境与试车声效 [M]">声效 <em>M</em></button>
+            <button id="btn-clean" class="util-btn" title="进入无UI纯净摄影模式 [H]">纯净 <em>H</em></button>
+          </div>
+        </div>
+      </header>
+
+      <!-- CONTEXTUAL FLOATING GUNSMITH ORDNANCE DRAWER (Appears on station hover/lock or [I]) -->
+      <aside id="ordnance-drawer" class="ordnance-drawer">
+        <div class="drawer-head">
+          <span class="drawer-kicker" id="ord-station-code">ALL STATIONS · 6× BRU</span>
+          <button id="btn-close-drawer" class="drawer-close" title="收起面板">×</button>
+        </div>
+        <div class="drawer-body">
+          <div class="drawer-badge" id="ord-type-badge">FULL STRIKE CONFIGURATION</div>
+          <h2 class="drawer-title" id="ord-title">12枚精确制导弹药混合满挂</h2>
+          <p class="drawer-sub" id="ord-en">CM-502KG · FT-9 · AR-4 DUAL EJECTOR RACKS</p>
+
+          <div class="drawer-metrics">
+            <div class="metric-row">
+              <span>挂载质量 MASS</span>
+              <strong id="ord-mass">680 KG (含复合挂架)</strong>
+            </div>
+            <div class="metric-row">
+              <span>有效射程 RANGE</span>
+              <strong id="ord-range">20.0 – 40.0 KM</strong>
+            </div>
+            <div class="metric-row">
+              <span>制导体制 SEEKER</span>
+              <strong id="ord-guidance">毫米波 / 红外成像 / 北斗激光复合</strong>
+            </div>
+            <div class="metric-row">
+              <span>战斗部 WARHEAD</span>
+              <strong id="ord-warhead">重型聚能破甲 / 高爆侵彻杀伤</strong>
+            </div>
+          </div>
+
+          <div class="drawer-actions">
+            <button id="btn-focus-ordnance" class="drawer-btn primary">推进特写检视</button>
+            <button id="btn-reset-station" class="drawer-btn">返回全景总览</button>
+          </div>
+        </div>
+      </aside>
+
+      <!-- STREAMLINED BOTTOM COMMAND CONSOLE -->
+      <footer class="bottom-bar">
+        <!-- Left: Ground BIT & Aircraft Systems Switches -->
+        <div class="sys-strip">
+          <button id="sys-engine" class="sys-switch" title="三发涡轮增压活塞发动机地面试车 [E]">
+            <span class="key-cap">E</span>
+            <span class="sys-label">地面试车</span>
+            <span class="sys-val" id="state-engine">OFF</span>
+          </button>
+          <div id="rpm-widget" class="rpm-widget">
+            <div class="rpm-bar"><div id="rpm-fill" class="rpm-bar-fill"></div></div>
+            <span id="rpm-text">0 RPM</span>
+          </div>
+
+          <button id="sys-laser" class="sys-switch" title="EO/IR-380 光电吊舱激光照射 [T]">
+            <span class="key-cap">T</span>
+            <span class="sys-label">激光照射</span>
+            <span class="sys-val" id="state-laser">SCAN</span>
+          </button>
+
+          <button id="sys-fcs" class="sys-switch" title="襟翼/副翼/方向舵/升降舵飞控自检 [F]">
+            <span class="key-cap">F</span>
+            <span class="sys-label">舵面自检</span>
+            <span class="sys-val" id="state-fcs">IDLE</span>
+          </button>
+
+          <button id="sys-lights" class="sys-switch active" title="垂尾防撞频闪灯与前起落架滑行灯 [N]">
+            <span class="key-cap">N</span>
+            <span class="sys-label">航行滑行灯</span>
+            <span class="sys-val" id="state-lights">ON</span>
+          </button>
+        </div>
+
+        <!-- Center: Symmetric 6-Hardpoint Underwing Loadout Rail -->
+        <div class="pylon-rail" id="pylon-matrix" aria-label="翼下6挂点实弹矩阵">
+          <!-- Populated dynamically from WEAPON_STATIONS_META -->
+        </div>
+
+        <!-- Right: 6 Cinema Camera Director Presets -->
+        <div class="camera-rail" id="cam-presets" aria-label="电影机位预设">
+          <button class="cam-tab active" data-cam="hero" title="珠海机库3/4全景主视觉 [1]">
+            <em>01</em>全景
+          </button>
+          <button class="cam-tab" data-cam="ordnance" title="右翼双联复合挂架与实弹特写 [2]">
+            <em>02</em>挂架
+          </button>
+          <button class="cam-tab" data-cam="nose" title="三色机头、前起落架与光电球特写 [3]">
+            <em>03</em>机头
+          </button>
+          <button class="cam-tab" data-cam="tail" title="尾推三发、双尾撑与腹鳍特写 [4]">
+            <em>04</em>尾撑
+          </button>
+          <button class="cam-tab" data-cam="top" title="二层走廊高处俯视机位 [5]">
+            <em>05</em>俯视
+          </button>
+          <button class="cam-tab" data-cam="orbit" title="电影感环绕自动运镜 [6]">
+            <em>06</em>巡航
+          </button>
+        </div>
+      </footer>
+    </div>
+
+    <!-- Clean Photo Mode Exit Pill -->
+    <button id="btn-restore-hud" class="restore-hud-btn hidden">
+      退出纯净摄影模式 <em>[H]</em>
+    </button>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
