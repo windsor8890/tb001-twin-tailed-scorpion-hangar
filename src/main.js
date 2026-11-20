@@ -25,8 +25,8 @@ const CAMERA_PRESETS = {
     fov: 33,
   },
   tail: {
-    pos: new THREE.Vector3(-4.65, 2.38, -8.35),
-    target: new THREE.Vector3(0.0, 1.88, -2.05),
+    pos: new THREE.Vector3(-5.65, 2.72, -7.85),
+    target: new THREE.Vector3(0.0, 1.72, -1.75),
     fov: 38,
   },
   top: {
@@ -185,25 +185,29 @@ async function init() {
       envRT.dispose();
       envRT = nextEnv;
     },
+    onCaptureSnapshot: () => {
+      hangar.renderReflection(renderer, scene, camera);
+      post.render(clock.elapsedTime);
+      const dataUrl = renderer.domElement.toDataURL('image/png');
+      const link = document.createElement('a');
+      link.download = `TB-001A-Hangar-${Date.now()}.png`;
+      link.href = dataUrl;
+      link.click();
+    },
   });
 
-  // Direct 3D Raycast Selection on Underwing Munitions
+  // Direct 3D Hover & Click Raycasting on Underwing Munitions
   const raycaster = new THREE.Raycaster();
   const pointerDownPos = new THREE.Vector2();
+  const hoverNdc = new THREE.Vector2();
+  let isPointerDragging = false;
 
-  renderer.domElement.addEventListener('pointerdown', (e) => {
-    pointerDownPos.set(e.clientX, e.clientY);
-  });
-
-  renderer.domElement.addEventListener('pointerup', (e) => {
-    if (Math.hypot(e.clientX - pointerDownPos.x, e.clientY - pointerDownPos.y) > 5) {
-      return;
-    }
-    const ndc = new THREE.Vector2(
-      (e.clientX / window.innerWidth) * 2 - 1,
-      -(e.clientY / window.innerHeight) * 2 + 1
+  function pickStationAtClientPos(clientX, clientY) {
+    hoverNdc.set(
+      (clientX / window.innerWidth) * 2 - 1,
+      -(clientY / window.innerHeight) * 2 + 1
     );
-    raycaster.setFromCamera(ndc, camera);
+    raycaster.setFromCamera(hoverNdc, camera);
     const hits = raycaster.intersectObjects(uav.munitions.group.children, true);
     if (hits.length > 0) {
       let obj = hits[0].object;
@@ -211,9 +215,38 @@ async function init() {
         obj = obj.parent;
       }
       if (obj && obj.name && obj.name.startsWith('STA-')) {
-        audio.playUiChirp('lock');
-        hud.selectStation(obj.name, true);
+        return obj.name;
       }
+    }
+    return null;
+  }
+
+  renderer.domElement.addEventListener('pointerdown', (e) => {
+    isPointerDragging = true;
+    pointerDownPos.set(e.clientX, e.clientY);
+  });
+
+  renderer.domElement.addEventListener('pointermove', (e) => {
+    if (isPointerDragging) return;
+    const hitId = pickStationAtClientPos(e.clientX, e.clientY);
+    renderer.domElement.style.cursor = hitId ? 'pointer' : 'grab';
+    hud.setHoveredStation(hitId);
+  });
+
+  renderer.domElement.addEventListener('pointerleave', () => {
+    isPointerDragging = false;
+    hud.setHoveredStation(null);
+  });
+
+  renderer.domElement.addEventListener('pointerup', (e) => {
+    isPointerDragging = false;
+    if (Math.hypot(e.clientX - pointerDownPos.x, e.clientY - pointerDownPos.y) > 5) {
+      return;
+    }
+    const hitId = pickStationAtClientPos(e.clientX, e.clientY);
+    if (hitId) {
+      audio.playUiChirp('lock');
+      hud.selectStation(hitId, true);
     }
   });
 

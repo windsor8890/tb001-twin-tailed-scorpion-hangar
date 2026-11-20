@@ -46,8 +46,10 @@ const CinematicLensShader = {
       float b = texture2D(tDiffuse, vUv - offset).b;
       vec3 col = vec3(r, g, b);
 
-      // Subtle filmic toe contrast to eliminate milky mid-blacks
-      col = mix(col, smoothstep(0.0, 1.0, col), 0.08);
+      // Subtle filmic S-curve toe & restrained cool-shadow / warm-highlight cinema grade
+      col = mix(col, smoothstep(0.0, 1.0, col), 0.11);
+      float luma = dot(col, vec3(0.2126, 0.7152, 0.0722));
+      col += mix(vec3(-0.004, 0.0, 0.008), vec3(0.007, 0.004, -0.003), smoothstep(0.2, 0.85, luma));
 
       float vig = 1.0 - distSq * (uVignette * 2.1);
       col *= clamp(vig, 0.62, 1.0);
@@ -83,11 +85,11 @@ export function createPostProcessing(renderer, scene, camera) {
   // Ground-Truth Ambient Occlusion (GTAO) for realistic pylon, cowling & tire contact depth!
   const gtaoPass = new GTAOPass(scene, camera, effW, effH);
   gtaoPass.output = GTAOPass.OUTPUT.Default;
-  gtaoPass.blendIntensity = 0.86;
+  gtaoPass.blendIntensity = 0.80;
   gtaoPass.updateGtaoMaterial({
-    radius: 0.44,
-    distanceExponent: 1.45,
-    thickness: 0.95,
+    radius: 0.38,
+    distanceExponent: 1.5,
+    thickness: 0.90,
     scale: 1.0,
     samples: 16,
     distanceFallOff: 1.0,

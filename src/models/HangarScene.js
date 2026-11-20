@@ -6,6 +6,8 @@ import {
   createContactShadowTexture,
   createArchitecturalRibTextures,
   createBrushedMetalTextures,
+  createGpuStencilTexture,
+  createBayStatusBoardTexture,
   createSoftGlowTexture,
 } from '../textures/ProceduralTextures.js';
 import { buildOrdnanceShowcaseRow, createOrdnanceMaterials } from './MunitionsSystem.js';
@@ -319,30 +321,46 @@ export function buildHangarScene() {
     uniforms: {
       tReflection: { value: reflectionRT.texture },
       uDrawingBufferSize: { value: new THREE.Vector2(1600, 900) },
-      uTint: { value: new THREE.Color(0x646e78) },
+      uTint: { value: new THREE.Color(0x5b646e) },
     },
     vertexShader: /* glsl */ `
+      varying vec3 vWorldPos;
       void main() {
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vWorldPos = wp.xyz;
+        gl_Position = projectionMatrix * viewMatrix * wp;
       }
     `,
     fragmentShader: /* glsl */ `
       uniform sampler2D tReflection;
       uniform vec2 uDrawingBufferSize;
       uniform vec3 uTint;
+      varying vec3 vWorldPos;
       void main() {
         vec2 uv = vec2(
           gl_FragCoord.x / uDrawingBufferSize.x,
           1.0 - gl_FragCoord.y / uDrawingBufferSize.y
         );
-        // 5-tap wide blur simulating satin-brushed concrete/epoxy sheen (never a glass mirror)
-        vec2 b = vec2(0.0032, 0.0038);
-        vec3 c = texture2D(tReflection, uv).rgb * 0.36;
-        c += texture2D(tReflection, uv + vec2(b.x, b.y)).rgb * 0.16;
-        c += texture2D(tReflection, uv + vec2(-b.x, b.y)).rgb * 0.16;
-        c += texture2D(tReflection, uv + vec2(b.x, -b.y)).rgb * 0.16;
-        c += texture2D(tReflection, uv + vec2(-b.x, -b.y)).rgb * 0.16;
-        gl_FragColor = vec4(c * uTint, 1.0);
+        // Physically based Schlick-Fresnel grazing-angle attenuation + 9-tap circular blur
+        // Steep downward views see dry matte concrete; low grazing angles catch soft architectural sheen!
+        vec3 viewDir = normalize(cameraPosition - vWorldPos);
+        float ndotv = clamp(viewDir.y, 0.0, 1.0);
+        float fresnel = mix(0.06, 0.62, pow(1.0 - ndotv, 2.8));
+
+        vec2 b = vec2(0.0046, 0.0056);
+        vec3 c = texture2D(tReflection, uv).rgb * 0.24;
+        c += texture2D(tReflection, uv + vec2(b.x, 0.0)).rgb * 0.11;
+        c += texture2D(tReflection, uv - vec2(b.x, 0.0)).rgb * 0.11;
+        c += texture2D(tReflection, uv + vec2(0.0, b.y)).rgb * 0.11;
+        c += texture2D(tReflection, uv - vec2(0.0, b.y)).rgb * 0.11;
+        c += texture2D(tReflection, uv + vec2(b.x, b.y) * 0.72).rgb * 0.08;
+        c += texture2D(tReflection, uv + vec2(-b.x, b.y) * 0.72).rgb * 0.08;
+        c += texture2D(tReflection, uv + vec2(b.x, -b.y) * 0.72).rgb * 0.08;
+        c += texture2D(tReflection, uv + vec2(-b.x, -b.y) * 0.72).rgb * 0.08;
+
+        vec3 baseConcrete = vec3(0.075, 0.082, 0.090);
+        vec3 outCol = mix(baseConcrete, c * uTint, fresnel);
+        gl_FragColor = vec4(outCol, 1.0);
       }
     `,
   });
@@ -356,10 +374,10 @@ export function buildHangarScene() {
   const epoxyFloorMat = new THREE.MeshStandardMaterial({
     map: deckTex.map,
     normalMap: deckTex.normalMap,
-    normalScale: new THREE.Vector2(0.75, 0.75),
+    normalScale: new THREE.Vector2(0.28, 0.28),
     roughnessMap: deckTex.roughnessMap,
-    roughness: 0.82,
-    metalness: 0.04,
+    roughness: 0.88,
+    metalness: 0.03,
     transparent: true,
     depthWrite: true,
   });
@@ -500,12 +518,14 @@ export function buildHangarScene() {
     passGlass.rotation.y = -Math.PI / 2;
     bayGrp.add(passGlass);
 
-    // Authentic Bay Number & Entry Stencil ("10-1", "10-2 入口", "10-3 出口")
+    // Authentic PBR-Lit Bay Number & Entry Stencil ("10-1", "10-2 入口", "10-3 出口")
     const signTex = createBaySignageTexture(bay.num, bay.sub);
     const signPlane = new THREE.Mesh(
       new THREE.PlaneGeometry(2.6, 1.95),
-      new THREE.MeshBasicMaterial({
+      new THREE.MeshStandardMaterial({
         map: signTex,
+        roughness: 0.62,
+        metalness: 0.05,
         transparent: true,
         depthWrite: false,
       })
@@ -636,6 +656,57 @@ export function buildHangarScene() {
     rPost.position.set(xc, 5.12, rearZ + 1.42);
     root.add(rPost);
   }
+
+  // Structural Rear-Wall Steel Wind X-Bracing Rods & Galvanized Electrical Conduits
+  for (const xb of [-12.0, -4.0, 4.0, 12.0]) {
+    const rodLen = Math.hypot(6.6, 6.2);
+    const rodAng = Math.atan2(6.6, 6.2);
+    for (const sgn of [-1, 1]) {
+      const rod = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.022, 0.022, rodLen, 8),
+        mats.steelSlate
+      );
+      rod.position.set(xb, 5.05, rearZ + 0.16);
+      rod.rotation.z = sgn * rodAng;
+      root.add(rod);
+    }
+    const conduit = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.032, 0.032, 8.2, 10),
+      mats.galvanized
+    );
+    conduit.position.set(xb + 3.4, 4.2, rearZ + 0.24);
+    root.add(conduit);
+  }
+
+  // Restrained Architectural Hangar Bay Status LED Display beneath Rear Catwalk
+  const boardFrame = new THREE.Mesh(
+    new RoundedBoxGeometry(6.6, 1.08, 0.14, 2, 0.02),
+    mats.steelDark
+  );
+  boardFrame.position.set(-2.2, 6.75, rearZ + 0.24);
+  root.add(boardFrame);
+
+  const boardFace = new THREE.Mesh(
+    new THREE.PlaneGeometry(6.36, 0.96),
+    new THREE.MeshBasicMaterial({ map: createBayStatusBoardTexture() })
+  );
+  boardFace.userData.noAO = true;
+  boardFace.position.set(-2.2, 6.75, rearZ + 0.32);
+  root.add(boardFace);
+
+  // Recessed Muted-Crimson Aviation Fire Hose & Safety Cabinet on Rear Dado Wall
+  const fireCabinetMat = new THREE.MeshStandardMaterial({
+    color: 0x8a2224,
+    roughness: 0.42,
+    metalness: 0.32,
+  });
+  const fireCab = new THREE.Mesh(
+    new RoundedBoxGeometry(0.92, 1.24, 0.24, 2, 0.015),
+    fireCabinetMat
+  );
+  fireCab.position.set(-10.6, 1.32, rearZ + 0.34);
+  fireCab.castShadow = true;
+  root.add(fireCab);
 
   // Partially Open Monumental Forward Sliding Hangar Doors (z = +19m) + Exterior Airfield Backdrop
   const fwdZ = D * 0.5;
@@ -1137,6 +1208,44 @@ export function buildHangarScene() {
   oledReadout.rotation.y = -Math.PI / 2;
   gpuGroup.add(oledReadout);
 
+  // GPU Industrial Side Identification Plates, Brushed Grab Handles & Exhaust Stack Pipe
+  const gpuStencilMat = new THREE.MeshStandardMaterial({
+    map: createGpuStencilTexture(),
+    roughness: 0.56,
+    metalness: 0.12,
+    transparent: true,
+    depthWrite: false,
+  });
+  for (const side of [-1, 1]) {
+    const stencil = new THREE.Mesh(new THREE.PlaneGeometry(0.76, 0.38), gpuStencilMat);
+    stencil.userData.noAO = true;
+    stencil.position.set(side * 0.535, 0.72, 0.36);
+    stencil.rotation.y = side > 0 ? Math.PI / 2 : -Math.PI / 2;
+    gpuGroup.add(stencil);
+
+    const grab = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.012, 0.012, 0.42, 8),
+      mats.brushedAlum
+    );
+    grab.position.set(side * 0.555, 0.80, 0.82);
+    gpuGroup.add(grab);
+  }
+
+  const gpuExhaust = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.036, 0.040, 0.34, 14),
+    mats.steelDark
+  );
+  gpuExhaust.position.set(0.28, 1.30, -0.56);
+  gpuGroup.add(gpuExhaust);
+
+  const exhaustCap = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.046, 0.046, 0.016, 14),
+    mats.brushedAlum
+  );
+  exhaustCap.position.set(0.28, 1.48, -0.56);
+  exhaustCap.rotation.z = 0.25;
+  gpuGroup.add(exhaustCap);
+
   // 4 Pneumatic Rubber GSE Tires + Brushed Aluminum 6-Lug Hubs
   for (const wx of [-0.54, 0.54]) {
     for (const wz of [-0.66, 0.66]) {
@@ -1178,7 +1287,7 @@ export function buildHangarScene() {
   towRing.position.set(0, 0.10, -1.74);
   gpuGroup.add(towRing);
 
-  // Heavy Umbilical 28VDC Power Cable snaking naturally from GPU to UAV Nose Receptacle
+  // Heavy Umbilical 28VDC Power Cable + Low-Profile Rubber/Amber Floor Cable-Protector Ramp
   const powerCableCurve = new THREE.CatmullRomCurve3([
     new THREE.Vector3(3.45, 0.42, 4.35),
     new THREE.Vector3(2.85, 0.026, 4.05),
@@ -1193,6 +1302,90 @@ export function buildHangarScene() {
   );
   powerCableMesh.castShadow = true;
   root.add(powerCableMesh);
+
+  const cableRampGrp = new THREE.Group();
+  cableRampGrp.position.set(2.15, 0, 3.76);
+  cableRampGrp.rotation.y = 0.42;
+  const rampBase = new THREE.Mesh(
+    new RoundedBoxGeometry(0.92, 0.052, 0.34, 2, 0.012),
+    mats.gseAnthracite
+  );
+  rampBase.position.y = 0.026;
+  rampBase.receiveShadow = true;
+  cableRampGrp.add(rampBase);
+
+  const rampLid = new THREE.Mesh(
+    new RoundedBoxGeometry(0.86, 0.016, 0.18, 2, 0.005),
+    mats.safetyBumperAmber
+  );
+  rampLid.position.y = 0.056;
+  cableRampGrp.add(rampLid);
+  root.add(cableRampGrp);
+
+  // --- 5E-0. Wheeled Aviation Flight-Line CO2 Fire Extinguisher Cart (beside ordnance cases) ---
+  const extCart = new THREE.Group();
+  extCart.position.set(-8.65, 0, -3.15);
+  extCart.rotation.y = 0.55;
+  root.add(extCart);
+  addContactShadow(-8.65, -3.15, 0.85, 0.92, 0.62, 0.55);
+
+  const extTank = new THREE.Mesh(
+    new THREE.CapsuleGeometry(0.155, 0.72, 10, 22),
+    fireCabinetMat
+  );
+  extTank.position.set(0, 0.62, 0);
+  extTank.rotation.x = -0.18;
+  extTank.castShadow = true;
+  extCart.add(extTank);
+
+  const extValve = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.032, 0.042, 0.14, 14),
+    mats.brushedAlum
+  );
+  extValve.position.set(0, 1.14, -0.09);
+  extCart.add(extValve);
+
+  const extHorn = new THREE.Mesh(
+    new THREE.ConeGeometry(0.068, 0.24, 16, 1, true),
+    mats.gseAnthracite
+  );
+  extHorn.position.set(0.16, 0.84, 0.04);
+  extHorn.rotation.z = -0.25;
+  extCart.add(extHorn);
+
+  for (const sx of [-0.22, 0.22]) {
+    const extWheel = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.19, 0.19, 0.05, 20),
+      mats.tireRubber
+    );
+    extWheel.rotation.z = Math.PI / 2;
+    extWheel.position.set(sx, 0.19, -0.10);
+    extWheel.castShadow = true;
+    extCart.add(extWheel);
+
+    const extHub = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.09, 0.09, 0.056, 14),
+      mats.brushedAlum
+    );
+    extHub.rotation.z = Math.PI / 2;
+    extHub.position.set(sx, 0.19, -0.10);
+    extCart.add(extHub);
+
+    const handleTube = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.014, 0.014, 1.18, 8),
+      mats.steelDark
+    );
+    handleTube.position.set(sx * 0.78, 0.66, -0.18);
+    handleTube.rotation.x = -0.18;
+    extCart.add(handleTube);
+  }
+  const handleCross = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.014, 0.014, 0.36, 8),
+    mats.steelDark
+  );
+  handleCross.rotation.z = Math.PI / 2;
+  handleCross.position.set(0, 1.24, -0.28);
+  extCart.add(handleCross);
 
   // --- 5D. Tubular Aerospace Maintenance Workstand (机务登高维护梯) ---
   const standGrp = new THREE.Group();

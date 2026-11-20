@@ -10,6 +10,8 @@ export function createHangarAudio() {
   let engineOscA = null;
   let engineOscB = null;
   let engineFilter = null;
+  let propWashGain = null;
+  let propWashFilter = null;
 
   function ensureInit() {
     if (ctx) return;
@@ -24,9 +26,9 @@ export function createHangarAudio() {
     // Subtle Deep Hangar Ventilation / Power-Transformer Room Tone
     const humOsc = ctx.createOscillator();
     humOsc.type = 'sine';
-    humOsc.frequency.value = 54;
+    humOsc.frequency.value = 52;
     const humGain = ctx.createGain();
-    humGain.gain.value = 0.055;
+    humGain.gain.value = 0.045;
     humOsc.connect(humGain);
     humGain.connect(masterGain);
     humOsc.start();
@@ -38,7 +40,7 @@ export function createHangarAudio() {
     engineFilter = ctx.createBiquadFilter();
     engineFilter.type = 'lowpass';
     engineFilter.frequency.value = 180;
-    engineFilter.Q.value = 2.2;
+    engineFilter.Q.value = 2.0;
 
     engineOscA = ctx.createOscillator();
     engineOscA.type = 'sawtooth';
@@ -46,7 +48,7 @@ export function createHangarAudio() {
 
     engineOscB = ctx.createOscillator();
     engineOscB.type = 'triangle';
-    engineOscB.frequency.value = 63.5; // Twin/tri-engine slight beat detune!
+    engineOscB.frequency.value = 63.5;
 
     engineOscA.connect(engineFilter);
     engineOscB.connect(engineFilter);
@@ -55,6 +57,33 @@ export function createHangarAudio() {
 
     engineOscA.start();
     engineOscB.start();
+
+    // Filtered Pink-Noise Propeller Airflow Wash (adds realistic turboprop air bite during run-up)
+    const bufLen = ctx.sampleRate * 2;
+    const noiseBuf = ctx.createBuffer(1, bufLen, ctx.sampleRate);
+    const ch = noiseBuf.getChannelData(0);
+    let b0 = 0;
+    for (let i = 0; i < bufLen; i++) {
+      const white = Math.random() * 2 - 1;
+      b0 = 0.96 * b0 + white * 0.04;
+      ch[i] = b0 * 3.5;
+    }
+    const noiseSrc = ctx.createBufferSource();
+    noiseSrc.buffer = noiseBuf;
+    noiseSrc.loop = true;
+
+    propWashFilter = ctx.createBiquadFilter();
+    propWashFilter.type = 'bandpass';
+    propWashFilter.frequency.value = 220;
+    propWashFilter.Q.value = 1.4;
+
+    propWashGain = ctx.createGain();
+    propWashGain.gain.value = 0.0;
+
+    noiseSrc.connect(propWashFilter);
+    propWashFilter.connect(propWashGain);
+    propWashGain.connect(masterGain);
+    noiseSrc.start();
   }
 
   function setEnabled(nextState) {
@@ -108,10 +137,14 @@ export function createHangarAudio() {
   function update(propRpmFactor) {
     if (!enabled || !ctx || !engineGain) return;
     const now = ctx.currentTime;
-    engineGain.gain.setTargetAtTime(propRpmFactor * 0.22, now, 0.08);
+    engineGain.gain.setTargetAtTime(propRpmFactor * 0.20, now, 0.08);
     engineOscA.frequency.setTargetAtTime(34 + propRpmFactor * 58, now, 0.08);
     engineOscB.frequency.setTargetAtTime(51 + propRpmFactor * 88.5, now, 0.08);
     engineFilter.frequency.setTargetAtTime(140 + propRpmFactor * 420, now, 0.08);
+    if (propWashGain && propWashFilter) {
+      propWashGain.gain.setTargetAtTime(propRpmFactor * propRpmFactor * 0.28, now, 0.09);
+      propWashFilter.frequency.setTargetAtTime(180 + propRpmFactor * 540, now, 0.09);
+    }
   }
 
   return {

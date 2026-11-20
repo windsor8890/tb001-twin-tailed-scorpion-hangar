@@ -1,8 +1,10 @@
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import {
   createAirframePanelTextures,
   createBrushedMetalTextures,
   createAircraftMarkingsTexture,
+  createOrdnancePlaqueTexture,
   createRbfRibbonTexture,
 } from '../textures/ProceduralTextures.js';
 
@@ -226,25 +228,41 @@ export function createOrdnanceMaterials() {
       roughness: 0.32,
       metalness: 0.88,
     }),
-    stencilCM502: new THREE.MeshBasicMaterial({
+    stencilCM502: new THREE.MeshStandardMaterial({
       map: createWeaponStencilTexture('CM-502', 'S/N 02-194 // LIVE'),
+      roughness: 0.65,
+      metalness: 0.08,
       transparent: true,
       depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
     }),
-    stencilFT9: new THREE.MeshBasicMaterial({
+    stencilFT9: new THREE.MeshStandardMaterial({
       map: createWeaponStencilTexture('FT-9', '50KG BDS/SAL PGM'),
+      roughness: 0.65,
+      metalness: 0.08,
       transparent: true,
       depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
     }),
-    stencilAR4: new THREE.MeshBasicMaterial({
+    stencilAR4: new THREE.MeshStandardMaterial({
       map: createWeaponStencilTexture('AR-4', '80KG TRI-MODE AGM'),
+      roughness: 0.65,
+      metalness: 0.08,
       transparent: true,
       depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
     }),
-    stencilTengdenPod: new THREE.MeshBasicMaterial({
+    stencilTengdenPod: new THREE.MeshStandardMaterial({
       map: createAircraftMarkingsTexture('tengden_pod'),
+      roughness: 0.65,
+      metalness: 0.08,
       transparent: true,
       depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
     }),
     rbfRibbon: new THREE.MeshStandardMaterial({
       map: createRbfRibbonTexture(),
@@ -676,22 +694,44 @@ export function buildMunitionsSystem(mats = createOrdnanceMaterials()) {
     pylonMesh.receiveShadow = true;
     stGroup.add(pylonMesh);
 
-    // 2. Stepped CNC Y-Spreader Dual Composite Rack
+    // Wing-to-Pylon Aerodynamic Root Fairing Collar
+    const rootCollar = new THREE.Mesh(
+      new RoundedBoxGeometry(0.11, 0.028, pylonLen * 1.04, 2, 0.008),
+      mats.pylonSlate
+    );
+    rootCollar.position.set(0, 0.032, 0.02);
+    stGroup.add(rootCollar);
+
+    // 2. Beveled CNC Y-Spreader Dual Composite Ejector Rack (Hero Close-Up Geometry!)
     const rackSpread = isHeavy ? 0.195 : meta.weaponType === 'FT-9' ? 0.172 : 0.152;
     const rackY = -pylonH + 0.03;
 
     const adapterBeam = new THREE.Mesh(
-      new THREE.BoxGeometry(0.11, 0.055, pylonLen * 0.76),
+      new RoundedBoxGeometry(0.115, 0.056, pylonLen * 0.78, 3, 0.009),
       mats.cncAnodizedDark
     );
     adapterBeam.position.set(0, rackY, 0.02);
     adapterBeam.castShadow = true;
+    adapterBeam.receiveShadow = true;
     stGroup.add(adapterBeam);
 
+    // CNC hex mounting bolt heads along pylon flank
+    for (const sDir of [-1, 1]) {
+      for (const zb of [-0.26, 0.02, 0.28]) {
+        const bolt = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.006, 0.006, 0.012, 6),
+          mats.cncSilver
+        );
+        bolt.rotation.z = Math.PI / 2;
+        bolt.position.set(sDir * 0.044, -pylonH * 0.45, zb);
+        stGroup.add(bolt);
+      }
+    }
+
     for (const side of [-1, 1]) {
-      // Angled CNC spreader arm
+      // Chamfered CNC spreader arm
       const arm = new THREE.Mesh(
-        new THREE.BoxGeometry(rackSpread + 0.03, 0.036, 0.34),
+        new RoundedBoxGeometry(rackSpread + 0.035, 0.036, 0.36, 2, 0.007),
         mats.pylonSlate
       );
       arm.position.set(side * (rackSpread * 0.5), rackY - 0.012, 0.02);
@@ -699,24 +739,32 @@ export function buildMunitionsSystem(mats = createOrdnanceMaterials()) {
       arm.castShadow = true;
       stGroup.add(arm);
 
-      // Ejector launch beam
+      // Machined Ejector Launch Rail
       const rail = new THREE.Mesh(
-        new THREE.BoxGeometry(0.046, 0.044, isHeavy ? 0.94 : 0.80),
+        new RoundedBoxGeometry(0.048, 0.046, isHeavy ? 0.96 : 0.82, 2, 0.007),
         mats.cncAnodizedDark
       );
       rail.position.set(side * rackSpread, rackY - 0.044, 0.03);
       rail.castShadow = true;
+      rail.receiveShadow = true;
       stGroup.add(rail);
 
-      // Threaded CNC silver sway-brace pads
-      for (const zb of [-0.16, 0.18]) {
+      // Threaded CNC silver sway-brace pads + central suspension lug shackles
+      for (const zb of [-0.17, 0.19]) {
+        const lugPin = new THREE.Mesh(
+          new THREE.BoxGeometry(0.018, 0.036, 0.038),
+          mats.cncSilver
+        );
+        lugPin.position.set(side * rackSpread, rackY - 0.068, zb);
+        stGroup.add(lugPin);
+
         for (const sDir of [-1, 1]) {
           const brace = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.0055, 0.0055, 0.048, 8),
+            new THREE.CylinderGeometry(0.0055, 0.0055, 0.052, 8),
             mats.cncSilver
           );
-          brace.position.set(side * rackSpread + sDir * 0.022, rackY - 0.072, zb);
-          brace.rotation.z = sDir * 0.34;
+          brace.position.set(side * rackSpread + sDir * 0.024, rackY - 0.072, zb);
+          brace.rotation.z = sDir * 0.36;
           stGroup.add(brace);
         }
       }
@@ -843,11 +891,11 @@ export function buildOrdnanceShowcaseRow(mats = createOrdnanceMaterials()) {
   rowGroup.name = 'OrdnanceShowcaseRow';
 
   const displaySpec = [
-    { type: 'TENGDEN-POD', xOff: 0.0, zOff: 0.12, yH: 0.44, zSpan: 0.82, pedestalH: 0.34 },
-    { type: 'TENGDEN-POD', xOff: -0.52, zOff: -0.02, yH: 0.42, zSpan: 0.82, pedestalH: 0.32 },
-    { type: 'FT-7-GLIDE', xOff: -1.06, zOff: 0.04, yH: 0.38, zSpan: 0.64, pedestalH: 0.30 },
-    { type: 'FT-9', xOff: -1.58, zOff: -0.04, yH: 0.35, zSpan: 0.56, pedestalH: 0.28 },
-    { type: 'AR-2-WHITE', xOff: -2.06, zOff: -0.08, yH: 0.32, zSpan: 0.44, pedestalH: 0.27 },
+    { type: 'TENGDEN-POD', code: 'TD-POD', sub: '重型防区外载荷', xOff: 0.0, zOff: 0.12, yH: 0.44, zSpan: 0.82, pedestalH: 0.33, rBody: 0.125 },
+    { type: 'TENGDEN-POD', code: 'TD-POD', sub: '多用途巡航布撒器', xOff: -0.52, zOff: -0.02, yH: 0.42, zSpan: 0.82, pedestalH: 0.31, rBody: 0.125 },
+    { type: 'FT-7-GLIDE', code: 'FT-7', sub: '平面弹翼滑翔炸弹', xOff: -1.06, zOff: 0.04, yH: 0.38, zSpan: 0.64, pedestalH: 0.29, rBody: 0.072 },
+    { type: 'FT-9', code: 'FT-9', sub: '50KG 精确制导炸弹', xOff: -1.58, zOff: -0.04, yH: 0.35, zSpan: 0.56, pedestalH: 0.27, rBody: 0.074 },
+    { type: 'AR-2-WHITE', code: 'AR-2', sub: '20KG 轻型空地导弹', xOff: -2.06, zOff: -0.08, yH: 0.32, zSpan: 0.44, pedestalH: 0.25, rBody: 0.048 },
   ];
 
   for (const item of displaySpec) {
@@ -859,23 +907,68 @@ export function buildOrdnanceShowcaseRow(mats = createOrdnanceMaterials()) {
     munition.position.y = item.yH;
     itemGrp.add(munition);
 
-    // Fore & aft blue-slate exhibition steel cradle stands (exact ref_3.jpg stands!)
+    // Sculpted Flanged Steel Exhibition Cradles with Rubber V-Saddle Pads & Weapon Plaque
+    const plaqueMat = new THREE.MeshStandardMaterial({
+      map: createOrdnancePlaqueTexture(item.code, item.sub),
+      roughness: 0.48,
+      metalness: 0.18,
+    });
+
     for (const zDir of [-1, 1]) {
+      const zPos = zDir * (item.zSpan * 0.5);
+
+      // Chamfered steel pedestal column
       const stand = new THREE.Mesh(
-        new THREE.BoxGeometry(0.20, item.pedestalH, 0.10),
+        new RoundedBoxGeometry(0.18, item.pedestalH, 0.095, 2, 0.008),
         mats.cradleBlue
       );
-      stand.position.set(0, item.pedestalH * 0.5, zDir * (item.zSpan * 0.5));
+      stand.position.set(0, item.pedestalH * 0.5 + 0.012, zPos);
       stand.castShadow = true;
       stand.receiveShadow = true;
       itemGrp.add(stand);
 
+      // Twin neoprene-padded V-saddle cheeks cradling the cylindrical munition body
+      for (const sx of [-1, 1]) {
+        const cheek = new THREE.Mesh(
+          new RoundedBoxGeometry(0.034, 0.056, 0.105, 2, 0.006),
+          mats.cableRubber
+        );
+        cheek.position.set(
+          sx * (item.rBody * 0.72 + 0.014),
+          item.yH - item.rBody * 0.72,
+          zPos
+        );
+        cheek.rotation.z = sx * -0.45;
+        itemGrp.add(cheek);
+      }
+
+      // Flanged dark steel footplate with 4 corner anchor bolts
       const basePlate = new THREE.Mesh(
-        new THREE.BoxGeometry(0.26, 0.014, 0.16),
+        new RoundedBoxGeometry(0.25, 0.016, 0.16, 2, 0.004),
         mats.cncAnodizedDark
       );
-      basePlate.position.set(0, 0.007, zDir * (item.zSpan * 0.5));
+      basePlate.position.set(0, 0.008, zPos);
+      basePlate.receiveShadow = true;
       itemGrp.add(basePlate);
+
+      for (const bx of [-0.095, 0.095]) {
+        for (const bz of [-0.055, 0.055]) {
+          const bolt = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.006, 0.006, 0.012, 6),
+            mats.cncSilver
+          );
+          bolt.position.set(bx, 0.018, zPos + bz);
+          itemGrp.add(bolt);
+        }
+      }
+
+      // Forward-facing exhibition weapon nameplate on the front pedestal
+      if (zDir > 0) {
+        const plaque = new THREE.Mesh(new THREE.PlaneGeometry(0.145, 0.072), plaqueMat);
+        plaque.userData.noAO = true;
+        plaque.position.set(0, item.pedestalH * 0.56, zPos + 0.049);
+        itemGrp.add(plaque);
+      }
     }
 
     rowGroup.add(itemGrp);

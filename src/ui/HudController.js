@@ -21,12 +21,14 @@ export function createHudController({
   onSelectCameraPreset,
   onFocusStationCamera,
   onResetEnvironmentLighting,
+  onCaptureSnapshot,
 }) {
   const hudRoot = document.getElementById('hud-root');
   const spatialLayer = document.getElementById('spatial-layer');
   const calloutSvg = document.getElementById('callout-svg');
   const calloutPinsContainer = document.getElementById('callout-pins');
   const btnRestoreHud = document.getElementById('btn-restore-hud');
+  const shutterFlash = document.getElementById('shutter-flash');
 
   const elAzm = document.getElementById('hud-azm');
   const elElv = document.getElementById('hud-elv');
@@ -40,6 +42,7 @@ export function createHudController({
   const btnInfo = document.getElementById('btn-info');
   const btnPins = document.getElementById('btn-pins');
   const btnAudio = document.getElementById('btn-audio');
+  const btnSnapshot = document.getElementById('btn-snapshot');
   const btnClean = document.getElementById('btn-clean');
 
   const btnEngine = document.getElementById('sys-engine');
@@ -78,12 +81,36 @@ export function createHudController({
   let cleanMode = false;
   let drawerPinned = false;
   let drawerHovering = false;
+  let hoveredStation3d = null;
   let selectedStationId = null;
 
   function syncDrawerVisibility() {
-    const shouldOpen = !cleanMode && (drawerPinned || drawerHovering || selectedStationId !== null);
+    const shouldOpen =
+      !cleanMode &&
+      (drawerPinned || drawerHovering || hoveredStation3d !== null || selectedStationId !== null);
     ordnanceDrawer.classList.toggle('open', shouldOpen);
     btnInfo.classList.toggle('active', drawerPinned || selectedStationId !== null);
+  }
+
+  function setHoveredStation(stationId) {
+    if (hoveredStation3d === stationId) return;
+    hoveredStation3d = stationId;
+    for (const [id, btn] of slotElements.entries()) {
+      btn.classList.toggle('hover-3d', id === stationId && id !== selectedStationId);
+    }
+    if (!selectedStationId) {
+      uav.munitions.setHighlightedStation(stationId);
+      if (stationId) {
+        const meta = WEAPON_STATIONS_META.find((m) => m.id === stationId);
+        if (meta) {
+          audio.playUiChirp('hover');
+          populateOrdnanceCard(meta, getStationMissileCount(meta));
+        }
+      } else {
+        populateOrdnanceCard(null);
+      }
+      syncDrawerVisibility();
+    }
   }
 
   // ============================================================================
@@ -393,6 +420,17 @@ export function createHudController({
     if (isNowOn) audio.playUiChirp('lock');
   }
 
+  function triggerSnapshot() {
+    audio.playUiChirp('lock');
+    if (shutterFlash) {
+      shutterFlash.classList.add('flash');
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => shutterFlash.classList.remove('flash'));
+      });
+    }
+    if (onCaptureSnapshot) onCaptureSnapshot();
+  }
+
   btnEngine.addEventListener('click', toggleEngine);
   btnLaser.addEventListener('click', toggleLaser);
   btnFcs.addEventListener('click', toggleFcs);
@@ -401,6 +439,7 @@ export function createHudController({
   btnRestoreHud.addEventListener('click', toggleCleanMode);
   btnPins.addEventListener('click', togglePins);
   btnInfo.addEventListener('click', toggleDrawerPinned);
+  if (btnSnapshot) btnSnapshot.addEventListener('click', triggerSnapshot);
   btnCloseDrawer.addEventListener('click', () => {
     drawerPinned = false;
     selectStation(null, false);
@@ -430,6 +469,7 @@ export function createHudController({
     if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
     const k = e.key.toLowerCase();
     if (k === 'h') toggleCleanMode();
+    else if (k === 'p') triggerSnapshot();
     else if (k === 'c') togglePins();
     else if (k === 'i') toggleDrawerPinned();
     else if (k === 'm') toggleAudio();
@@ -487,7 +527,14 @@ export function createHudController({
     const placedBadges = [];
 
     for (const rec of pinRecords) {
-      if (hideClose) {
+      // Context-aware hemisphere filtering so nose callouts don't bleed across rear tail views
+      const rearViewOcclusion =
+        camera.position.z < -2.6 &&
+        (rec.anchor.id === 'satcom' || rec.anchor.id === 'eoir');
+      const noseViewOcclusion =
+        camera.position.z > 4.2 && dist < 7.0 && rec.anchor.id === 'empennage';
+
+      if (hideClose || rearViewOcclusion || noseViewOcclusion) {
         rec.pinEl.style.opacity = '0';
         rec.pinEl.style.pointerEvents = 'none';
         rec.pathEl.style.opacity = '0';
@@ -557,6 +604,7 @@ export function createHudController({
   return {
     update,
     selectStation,
+    setHoveredStation,
     setActiveCamButton,
   };
 }

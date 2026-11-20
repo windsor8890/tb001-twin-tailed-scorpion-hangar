@@ -240,27 +240,64 @@ export function createFuselageLiveryTextures(scheme = 'airshow') {
     hCtx.stroke();
   }
 
-  // Avionics Access Hatches with rounded corners & flush latches
+  // Avionics Access Hatches with rounded corners, flush latches & static-port warning rings
   const hatches = [
     [0.24, 0.41, 90, 56],
     [0.76, 0.41, 90, 56],
     [0.26, 0.68, 76, 48],
     [0.74, 0.68, 76, 48],
+    [0.23, 0.27, 54, 38],
+    [0.77, 0.27, 54, 38],
   ];
   for (const [hu, hv, hw, hh] of hatches) {
     const hx = hu * size - hw / 2;
     const hy = (1.0 - hv) * size - hh / 2;
-    aCtx.strokeStyle = 'rgba(20, 24, 28, 0.34)';
-    aCtx.lineWidth = 1.5;
+    aCtx.strokeStyle = 'rgba(20, 24, 28, 0.38)';
+    aCtx.lineWidth = 1.6;
     aCtx.beginPath();
     aCtx.roundRect(hx, hy, hw, hh, 6);
     aCtx.stroke();
 
-    hCtx.strokeStyle = '#444444';
+    // Subtle interior panel tonal shift for authentic aircraft skin-patch depth
+    aCtx.fillStyle = 'rgba(0, 0, 0, 0.025)';
+    aCtx.fill();
+
+    // Corner quarter-turn Dzus flush fasteners
+    for (const [fx, fy] of [
+      [hx + 8, hy + 8],
+      [hx + hw - 8, hy + 8],
+      [hx + 8, hy + hh - 8],
+      [hx + hw - 8, hy + hh - 8],
+    ]) {
+      aCtx.fillStyle = 'rgba(18, 22, 26, 0.52)';
+      aCtx.beginPath();
+      aCtx.arc(fx, fy, 2.2, 0, Math.PI * 2);
+      aCtx.fill();
+      hCtx.fillStyle = '#4c4c4c';
+      hCtx.fillRect(fx - 1.5, fy - 1.5, 3, 3);
+    }
+
+    hCtx.strokeStyle = '#404040';
     hCtx.lineWidth = 2.0;
     hCtx.beginPath();
     hCtx.roundRect(hx, hy, hw, hh, 6);
     hCtx.stroke();
+  }
+
+  // Authentic Aviation Red Static-Port Warning Circles on Port & Starboard Nose Cheeks
+  for (const su of [0.275, 0.725]) {
+    const sx = su * size;
+    const sy = (1.0 - 0.21) * size;
+    aCtx.strokeStyle = 'rgba(176, 42, 42, 0.72)';
+    aCtx.lineWidth = 2.6;
+    aCtx.beginPath();
+    aCtx.arc(sx, sy, 10, 0, Math.PI * 2);
+    aCtx.stroke();
+
+    aCtx.fillStyle = 'rgba(22, 26, 30, 0.85)';
+    aCtx.beginPath();
+    aCtx.arc(sx, sy, 2.8, 0, Math.PI * 2);
+    aCtx.fill();
   }
 
   // Official Forward Fuselage Branding on BOTH Port (u≈0.28) & Starboard (u≈0.72) flanks!
@@ -552,72 +589,103 @@ export function createHangarDeckTextures() {
   const rCtx = rough.getContext('2d');
   const rand = seededRandom(90210);
 
-  // Authentic brushed airfield concrete-epoxy apron (0.93 opacity & ~0.78 matte roughness so floor looks like real concrete, never wet plastic!)
-  aCtx.clearRect(0, 0, size, size);
-  aCtx.fillStyle = 'rgba(58, 63, 69, 0.93)';
-  aCtx.fillRect(0, 0, size, size);
+  // Authentic poured aviation concrete apron (isotropic mineral aggregate — zero artificial horizontal stripes!)
+  const aImg = aCtx.createImageData(size, size);
+  const hImg = hCtx.createImageData(size, size);
+  const rImg = rCtx.createImageData(size, size);
+  const aDat = aImg.data;
+  const hDat = hImg.data;
+  const rDat = rImg.data;
 
-  hCtx.fillStyle = '#808080';
-  hCtx.fillRect(0, 0, size, size);
+  // Deterministic 2D value-noise hash for realistic multi-scale concrete aggregate
+  const hash2 = (ix, iy) => {
+    let n = (ix * 374761393 + iy * 668265263) ^ 0x5bf03635;
+    n = (n ^ (n >> 13)) * 1274126177;
+    return ((n ^ (n >> 16)) >>> 0) / 4294967295;
+  };
 
-  rCtx.fillStyle = '#c4c4c4'; // ~0.77 dry satin-matte industrial concrete
-  rCtx.fillRect(0, 0, size, size);
+  const slabs = 12;
+  const slabStep = size / slabs;
 
-  // Fine brushed concrete grain lines (inspired by grooved airfield apron in ref_3.jpg!)
-  for (let y = 0; y < size; y += 3) {
-    const shade = rand() > 0.5 ? 'rgba(255,255,255,0.012)' : 'rgba(0,0,0,0.016)';
-    aCtx.fillStyle = shade;
-    aCtx.fillRect(0, y, size, 1.5);
+  for (let py = 0; py < size; py++) {
+    const slabRow = Math.floor(py / slabStep);
+    for (let px = 0; px < size; px++) {
+      const slabCol = Math.floor(px / slabStep);
+      // Subtle per-slab concrete pour tonal shift
+      const slabShift = (hash2(slabCol + 17, slabRow + 31) - 0.5) * 9.0;
+      // Multi-scale mineral aggregate grain (4px pebble + 1px sand grit)
+      const coarse = (hash2(px >> 2, py >> 2) - 0.5) * 10.0;
+      const fine = (hash2(px, py) - 0.5) * 8.0;
+      const speck = coarse * 0.55 + fine * 0.45;
 
-    const hv = Math.round(122 + rand() * 12);
-    hCtx.fillStyle = `rgb(${hv},${hv},${hv})`;
-    hCtx.fillRect(0, y, size, 2);
+      const idx = (py * size + px) * 4;
+      const baseR = 66 + slabShift + speck;
+      const baseG = 70 + slabShift + speck;
+      const baseB = 75 + slabShift + speck;
+
+      aDat[idx] = Math.max(0, Math.min(255, baseR));
+      aDat[idx + 1] = Math.max(0, Math.min(255, baseG));
+      aDat[idx + 2] = Math.max(0, Math.min(255, baseB));
+      aDat[idx + 3] = 240; // ~0.94 concrete opacity: only subtle Fresnel grazing sheen leaks through!
+
+      const hv = Math.max(0, Math.min(255, 128 + speck * 1.15));
+      hDat[idx] = hDat[idx + 1] = hDat[idx + 2] = hv;
+      hDat[idx + 3] = 255;
+
+      const rv = Math.max(150, Math.min(242, 206 - slabShift * 1.2 + coarse * 1.4));
+      rDat[idx] = rDat[idx + 1] = rDat[idx + 2] = rv;
+      rDat[idx + 3] = 255;
+    }
   }
+  aCtx.putImageData(aImg, 0, 0);
+  hCtx.putImageData(hImg, 0, 0);
+  rCtx.putImageData(rImg, 0, 0);
 
-  // Organic troweled epoxy sheen & weathered concrete roughness variation
-  for (let i = 0; i < 1200; i++) {
+  // Broad organic troweled concrete weathering, dry dust & faint maintenance oil/sealer blotches
+  for (let i = 0; i < 680; i++) {
     const x = rand() * size;
     const y = rand() * size;
-    const rad = 24 + rand() * 130;
-    const smoother = rand() > 0.48;
+    const rad = 36 + rand() * 160;
+    const smoother = rand() > 0.56;
 
     if (smoother) {
+      // Subtle sealed concrete wear path (barely reveals Fresnel floor reflection)
       aCtx.save();
       aCtx.globalCompositeOperation = 'destination-out';
       const g = aCtx.createRadialGradient(x, y, 0, x, y, rad);
-      g.addColorStop(0, 'rgba(0,0,0,0.12)');
+      g.addColorStop(0, 'rgba(0,0,0,0.08)');
       g.addColorStop(1, 'rgba(0,0,0,0)');
       aCtx.fillStyle = g;
       aCtx.fillRect(x - rad, y - rad, rad * 2, rad * 2);
       aCtx.restore();
 
       const rg = rCtx.createRadialGradient(x, y, 0, x, y, rad);
-      rg.addColorStop(0, 'rgba(48,48,48,0.32)');
+      rg.addColorStop(0, 'rgba(138,138,138,0.22)');
       rg.addColorStop(1, 'rgba(0,0,0,0)');
       rCtx.fillStyle = rg;
       rCtx.fillRect(x - rad, y - rad, rad * 2, rad * 2);
     } else {
       const g = aCtx.createRadialGradient(x, y, 0, x, y, rad);
-      g.addColorStop(0, 'rgba(48,52,58,0.14)');
+      g.addColorStop(0, rand() > 0.5 ? 'rgba(90,94,98,0.11)' : 'rgba(32,35,38,0.12)');
       g.addColorStop(1, 'rgba(0,0,0,0)');
       aCtx.fillStyle = g;
       aCtx.fillRect(x - rad, y - rad, rad * 2, rad * 2);
 
       const rg = rCtx.createRadialGradient(x, y, 0, x, y, rad);
-      rg.addColorStop(0, 'rgba(195,195,195,0.28)');
+      rg.addColorStop(0, 'rgba(232,232,232,0.26)');
       rg.addColorStop(1, 'rgba(0,0,0,0)');
       rCtx.fillStyle = rg;
       rCtx.fillRect(x - rad, y - rad, rad * 2, rad * 2);
     }
   }
 
-  // Saw-cut concrete slab expansion joints (12x12 architectural slabs)
-  const slabs = 12;
-  const step = size / slabs;
+  // Saw-cut concrete slab expansion joints (12x12 architectural slabs with weathered edges)
+  const step = slabStep;
   for (let i = 1; i < slabs; i++) {
     const p = i * step;
-    aCtx.strokeStyle = 'rgba(14, 16, 19, 0.94)';
-    aCtx.lineWidth = 3.0;
+    // Slight dark sealant seam + faint worn concrete edge bevel
+    aCtx.strokeStyle = 'rgba(22, 25, 29, 0.88)';
+    aCtx.lineWidth = 2.6;
     aCtx.beginPath();
     aCtx.moveTo(p, 0);
     aCtx.lineTo(p, size);
@@ -625,18 +693,17 @@ export function createHangarDeckTextures() {
     aCtx.lineTo(size, p);
     aCtx.stroke();
 
-    hCtx.strokeStyle = '#1e1e1e';
-    hCtx.lineWidth = 4.0;
+    hCtx.strokeStyle = '#383838';
+    hCtx.lineWidth = 3.2;
     hCtx.beginPath();
     hCtx.moveTo(p, 0);
     hCtx.lineTo(p, size);
-    aCtx.moveTo(0, p);
     hCtx.moveTo(0, p);
     hCtx.lineTo(size, p);
     hCtx.stroke();
 
-    rCtx.strokeStyle = '#e5e5e5';
-    rCtx.lineWidth = 5.0;
+    rCtx.strokeStyle = '#eaeaea';
+    rCtx.lineWidth = 4.5;
     rCtx.beginPath();
     rCtx.moveTo(p, 0);
     rCtx.lineTo(p, size);
@@ -713,12 +780,96 @@ export function createHangarDeckTextures() {
   map.colorSpace = THREE.SRGBColorSpace;
   map.anisotropy = 8;
 
-  const normalMap = heightCanvasToNormalTexture(height, 2.2, 1, 1);
+  const normalMap = heightCanvasToNormalTexture(height, 1.15, 1, 1);
 
   const roughnessMap = new THREE.CanvasTexture(rough);
   roughnessMap.anisotropy = 8;
 
   return { map, normalMap, roughnessMap };
+}
+
+/**
+ * Generates Industrial 28V Aerospace GPU Side Identification Plate Texture.
+ */
+export function createGpuStencilTexture() {
+  const c = createCanvas(512, 256);
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, 512, 256);
+
+  ctx.fillStyle = 'rgba(28, 34, 42, 0.88)';
+  ctx.font = '700 52px "Barlow Condensed", sans-serif';
+  ctx.fillText('GPU-28V  //  400HZ', 28, 84);
+
+  ctx.fillStyle = 'rgba(42, 48, 56, 0.72)';
+  ctx.font = '600 22px "IBM Plex Mono", monospace';
+  ctx.fillText('AEROSPACE GROUND POWER UNIT', 30, 122);
+
+  // Subtle amber-black caution bar
+  ctx.fillStyle = '#c48624';
+  ctx.fillRect(28, 152, 280, 26);
+  ctx.fillStyle = '#15181c';
+  ctx.font = '700 16px "IBM Plex Mono", monospace';
+  ctx.fillText('CAUTION · HIGH VOLTAGE OUTPUT', 38, 171);
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  return tex;
+}
+
+/**
+ * Generates Exhibition Stand Weapon Nameplate Texture for Foreground Static Showcase.
+ */
+export function createOrdnancePlaqueTexture(code, subtitle) {
+  const c = createCanvas(256, 128);
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#1b3d68';
+  ctx.fillRect(0, 0, 256, 128);
+
+  ctx.strokeStyle = 'rgba(236, 240, 244, 0.45)';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(6, 6, 244, 116);
+
+  ctx.fillStyle = '#edf1f5';
+  ctx.font = '700 38px "Barlow Condensed", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(code, 128, 60);
+
+  ctx.fillStyle = 'rgba(205, 220, 236, 0.85)';
+  ctx.font = '500 18px "Noto Sans SC", "IBM Plex Mono", sans-serif';
+  ctx.fillText(subtitle, 128, 96);
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  return tex;
+}
+
+/**
+ * Generates Restrained Architectural Warm-Amber Hangar Bay Status Board Texture.
+ */
+export function createBayStatusBoardTexture() {
+  const c = createCanvas(1024, 160);
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#0e1116';
+  ctx.fillRect(0, 0, 1024, 160);
+
+  ctx.strokeStyle = 'rgba(200, 164, 100, 0.35)';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(6, 6, 1012, 148);
+
+  ctx.fillStyle = '#c8a464';
+  ctx.font = '600 44px "IBM Plex Mono", monospace';
+  ctx.fillText('BAY 10-2  //  TW328-A  [JD-1052]', 36, 72);
+
+  ctx.fillStyle = 'rgba(220, 226, 232, 0.72)';
+  ctx.font = '500 24px "IBM Plex Mono", "Noto Sans SC", monospace';
+  ctx.fillText('ORDNANCE CONFIG: 6× BRU DUAL · 12 LIVE  |  GROUND POWER: 28.4V NOMINAL', 36, 122);
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  return tex;
 }
 
 /**

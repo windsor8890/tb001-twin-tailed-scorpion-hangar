@@ -10,23 +10,102 @@ import {
 import { buildMunitionsSystem, createOrdnanceMaterials } from './MunitionsSystem.js';
 
 /**
+ * Smooth Catmull-Rom longitudinal station upsampler for Class-A aerospace lofting
+ * (completely eliminates polygonal banding along the curved Beluga SATCOM forehead & cowlings).
+ */
+function resampleStationsSmooth(stations, samplesPerSpan = 4) {
+  if (stations.length < 3) return stations;
+  const out = [];
+  const catmull = (p0, p1, p2, p3, t) => {
+    const t2 = t * t;
+    const t3 = t2 * t;
+    return (
+      0.5 *
+      (2 * p1 +
+        (-p0 + p2) * t +
+        (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 +
+        (-p0 + 3 * p1 - 3 * p2 + p3) * t3)
+    );
+  };
+
+  const n = stations.length;
+  for (let i = 0; i < n - 1; i++) {
+    const s0 = stations[Math.max(0, i - 1)];
+    const s1 = stations[i];
+    const s2 = stations[i + 1];
+    const s3 = stations[Math.min(n - 1, i + 2)];
+    const steps = i === n - 2 ? samplesPerSpan : samplesPerSpan;
+    for (let k = 0; k < steps; k++) {
+      const t = k / samplesPerSpan;
+      const yTop = catmull(s0.yTop, s1.yTop, s2.yTop, s3.yTop, t);
+      const yBot = catmull(s0.yBot, s1.yBot, s2.yBot, s3.yBot, t);
+      const yc0 = s0.yChine !== undefined ? s0.yChine : (s0.yTop + s0.yBot) * 0.5;
+      const yc1 = s1.yChine !== undefined ? s1.yChine : (s1.yTop + s1.yBot) * 0.5;
+      const yc2 = s2.yChine !== undefined ? s2.yChine : (s2.yTop + s2.yBot) * 0.5;
+      const yc3 = s3.yChine !== undefined ? s3.yChine : (s3.yTop + s3.yBot) * 0.5;
+      const yChine = THREE.MathUtils.clamp(
+        catmull(yc0, yc1, yc2, yc3, t),
+        yBot + 0.004,
+        yTop - 0.004
+      );
+      out.push({
+        z: THREE.MathUtils.lerp(s1.z, s2.z, t),
+        yTop,
+        yBot,
+        yChine,
+        rx: Math.max(0.012, catmull(s0.rx, s1.rx, s2.rx, s3.rx, t)),
+        expTop: THREE.MathUtils.lerp(s1.expTop ?? 0.92, s2.expTop ?? 0.92, t),
+        expBot: THREE.MathUtils.lerp(s1.expBot ?? 0.78, s2.expBot ?? 0.78, t),
+        chineSharpness: Math.max(
+          0,
+          THREE.MathUtils.lerp(s1.chineSharpness ?? 0, s2.chineSharpness ?? 0, t)
+        ),
+      });
+    }
+  }
+  out.push(stations[n - 1]);
+  return out;
+}
+
+/**
+ * Builds a smooth aerodynamic teardrop canoe geometry for underwing flap-hinge fairings
+ * (eliminating flat open cone bases visible during close-up pylon inspection).
+ */
+function buildTeardropFairingGeometry(length = 0.52, maxR = 0.036) {
+  const pts = [];
+  const steps = 16;
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps; // 0 = rounded forward nose (+Z), 1 = tapered rear point (-Z)
+    const r =
+      t < 0.25
+        ? maxR * Math.sin((t / 0.25) * Math.PI * 0.5)
+        : maxR * Math.pow(1 - (t - 0.25) / 0.75, 1.25);
+    pts.push(new THREE.Vector2(Math.max(0.001, r), (0.35 - t) * length));
+  }
+  const geo = new THREE.LatheGeometry(pts, 18);
+  geo.rotateX(Math.PI / 2);
+  return geo;
+}
+
+/**
  * Lofted Multi-Station Body Builder with explicit Lateral Chine Height (yChine)
  * so the upper dorsal SATCOM dome and flat-bottomed lower canoe hull match
  * real Tengden TB-001 cross-sections without oval sausage distortion.
  */
-function buildChinedLoftedGeometry(stations, radialSegs = 56, uScale = 1, vScale = 1) {
-  const ringCount = stations.length;
+function buildChinedLoftedGeometry(stations, radialSegs = 64, uScale = 1, vScale = 1) {
+  const smoothStations = resampleStationsSmooth(stations, 4);
+  const ringCount = smoothStations.length;
   const cols = radialSegs + 1;
   const positions = new Float32Array(ringCount * cols * 3);
   const uvs = new Float32Array(ringCount * cols * 2);
   const indices = [];
 
-  const zMax = stations[0].z;
-  const zMin = stations[ringCount - 1].z;
+  const zMax = smoothStations[0].z;
+  const zMin = smoothStations[ringCount - 1].z;
   const zSpan = Math.max(0.001, zMax - zMin);
 
   for (let i = 0; i < ringCount; i++) {
-    const st = stations[i];
+    const st = smoothStations[i];
     const yChine = st.yChine !== undefined ? st.yChine : (st.yTop + st.yBot) * 0.5;
     const ryTop = Math.max(0.001, st.yTop - yChine);
     const ryBot = Math.max(0.001, yChine - st.yBot);
@@ -353,18 +432,36 @@ function buildScimitarPropeller(bladeRadius, isPusher, mats) {
     grp.add(holder);
   }
 
-  // Subtle realistic motion-blur rotor disc
+  // Realistic 3-blade streaked radial rotor motion-blur disc
   const blurC = document.createElement('canvas');
-  blurC.width = 256;
-  blurC.height = 256;
+  blurC.width = 512;
+  blurC.height = 512;
   const ctx = blurC.getContext('2d');
-  const g = ctx.createRadialGradient(128, 128, 22, 128, 128, 125);
-  g.addColorStop(0, 'rgba(180,190,200,0)');
-  g.addColorStop(0.3, 'rgba(185,195,205,0.22)');
-  g.addColorStop(0.88, 'rgba(185,195,205,0.14)');
+  ctx.translate(256, 256);
+  const g = ctx.createRadialGradient(0, 0, 38, 0, 0, 248);
+  g.addColorStop(0, 'rgba(185,195,205,0)');
+  g.addColorStop(0.25, 'rgba(195,205,214,0.16)');
+  g.addColorStop(0.84, 'rgba(180,192,202,0.12)');
+  g.addColorStop(0.95, 'rgba(218,224,230,0.20)');
   g.addColorStop(1, 'rgba(185,195,205,0)');
   ctx.fillStyle = g;
-  ctx.fillRect(0, 0, 256, 256);
+  ctx.beginPath();
+  ctx.arc(0, 0, 248, 0, Math.PI * 2);
+  ctx.fill();
+
+  for (let b = 0; b < 3; b++) {
+    const baseA = (b * Math.PI * 2) / 3;
+    for (let s = 0; s < 12; s++) {
+      const a0 = baseA + s * 0.055;
+      const alpha = (1 - s / 12) * 0.14;
+      ctx.fillStyle = `rgba(215, 224, 232, ${alpha.toFixed(3)})`;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.arc(0, 0, 244, a0, a0 + 0.07);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
 
   const blurMat = new THREE.MeshBasicMaterial({
     map: new THREE.CanvasTexture(blurC),
@@ -594,9 +691,11 @@ export function buildTwinTailedScorpion() {
     return shapedSin * rx * chineBoost;
   }
 
-  // Contoured Side Branding Decals: Exact "TENGDEN / 腾 | 盾 | 科 | 创" from ref_3.jpg!
-  const tengdenBrandMat = new THREE.MeshBasicMaterial({
+  // Contoured PBR-Lit Side Branding Decals: Exact "TENGDEN / 腾 | 盾 | 科 | 创" from ref_3.jpg!
+  const tengdenBrandMat = new THREE.MeshStandardMaterial({
     map: createAircraftMarkingsTexture('tengden_brand'),
+    roughness: 0.68,
+    metalness: 0.05,
     transparent: true,
     depthWrite: false,
     polygonOffset: true,
@@ -605,7 +704,7 @@ export function buildTwinTailedScorpion() {
   });
   const tengdenDecals = [];
   for (const side of [-1, 1]) {
-    const segZ = 18;
+    const segZ = 22;
     const segY = 8;
     const dGeo = new THREE.PlaneGeometry(1.16, 0.27, segZ, segY);
     const pos = dGeo.attributes.position;
@@ -624,7 +723,34 @@ export function buildTwinTailedScorpion() {
     tengdenDecals.push(decalMesh);
   }
 
-  // Dorsal UHF/Data-Link Blade Antenna & Flush GPS Domes
+  // Aerospace Air-Data Suite: Twin Cheek AOA Vanes, Dorsal GPS/Beidou Pucks & Ventral UHF Blade
+  for (const side of [-1, 1]) {
+    const aoaBase = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.016, 0.018, 0.014, 12),
+      mats.brushedSilver
+    );
+    aoaBase.rotation.z = Math.PI / 2;
+    const aoaX = evalFuselageHalfWidth(3.52, 1.33);
+    aoaBase.position.set(side * (aoaX + 0.003), 1.33, 3.52);
+    uavRoot.add(aoaBase);
+
+    const aoaVane = new THREE.Mesh(
+      new THREE.BoxGeometry(0.048, 0.010, 0.036),
+      mats.brushedSilver
+    );
+    aoaVane.position.set(side * (aoaX + 0.028), 1.33, 3.51);
+    uavRoot.add(aoaVane);
+  }
+
+  for (const zg of [2.42, 1.48]) {
+    const gpsPuck = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.062, 0.072, 0.018, 20),
+      mats.gearEnamelWhite
+    );
+    gpsPuck.position.set(0, zg > 2.0 ? 2.11 : 1.98, zg);
+    uavRoot.add(gpsPuck);
+  }
+
   const dorsalBlade = new THREE.Mesh(
     new THREE.BoxGeometry(0.012, 0.22, 0.15),
     mats.dielectricGullGray
@@ -632,6 +758,14 @@ export function buildTwinTailedScorpion() {
   dorsalBlade.position.set(0, 1.98, -0.45);
   dorsalBlade.rotation.x = -0.28;
   uavRoot.add(dorsalBlade);
+
+  const ventralUhfBlade = new THREE.Mesh(
+    new THREE.BoxGeometry(0.010, 0.18, 0.13),
+    mats.boomDarkSlate
+  );
+  ventralUhfBlade.position.set(0, 1.03, 0.62);
+  ventralUhfBlade.rotation.x = 0.28;
+  uavRoot.add(ventralUhfBlade);
 
   // ============================================================================
   // 2. VENTRAL NOSE LANDING GEAR (z = +3.08m) & EO/IR-380 GIMBAL BALL (z = +1.82m)
@@ -645,6 +779,39 @@ export function buildTwinTailedScorpion() {
   uavRoot.add(noseGearGroup);
 
   const noseWheelR = 0.21;
+
+  // Recessed Dark Wheel-Well Cavity Framing & Inner Bulkhead directly under fuselage belly!
+  const noseWellRim = new THREE.Mesh(
+    new THREE.BoxGeometry(0.32, 0.06, 0.68),
+    mats.cavityBlack
+  );
+  noseWellRim.position.set(0, 1.10, -0.04);
+  noseGearGroup.add(noseWellRim);
+
+  const noseWellTrim = new THREE.Mesh(
+    new THREE.BoxGeometry(0.35, 0.014, 0.72),
+    mats.gearBayPrimer
+  );
+  noseWellTrim.position.set(0, 1.09, -0.04);
+  noseGearGroup.add(noseWellTrim);
+
+  // Nose Steering Actuator Collar & Flexible Hydraulic Hose
+  const steerCollar = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.056, 0.056, 0.085, 18),
+    mats.cncDark
+  );
+  steerCollar.position.set(0, 0.94, 0);
+  noseGearGroup.add(steerCollar);
+
+  const noseHoseCurve = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(0.045, 1.05, -0.08),
+    new THREE.Vector3(0.058, 0.82, -0.04),
+    new THREE.Vector3(0.046, 0.56, -0.02),
+    new THREE.Vector3(0.032, 0.38, -0.01),
+  ]);
+  noseGearGroup.add(
+    new THREE.Mesh(new THREE.TubeGeometry(noseHoseCurve, 14, 0.006, 6, false), mats.tireRubber)
+  );
 
   // Starboard Sleek Rectangular Open Nose Gear Door (proportioned cleanly to ref_3.jpg)
   const stbdNoseDoor = new THREE.Mesh(
@@ -826,12 +993,13 @@ export function buildTwinTailedScorpion() {
     eoirBallGroup.add(curvedObjective);
   }
 
-  // Optional Collimated Tactical Laser Designator Beam
-  const laserBeamGeo = new THREE.CylinderGeometry(0.004, 0.018, 13.5, 12, 1, true);
-  laserBeamGeo.translate(0, -6.75, 0);
-  laserBeamGeo.rotateX(-Math.PI / 2);
+  // Dynamically Terminated 1064nm Tactical Laser Designator Beam + Floor Target Impact Reticle
+  // Unit-length cylinder along +Z scaled dynamically to exact floor ray-intersection distance!
+  const laserBeamGeo = new THREE.CylinderGeometry(0.0035, 0.014, 1.0, 12, 1, true);
+  laserBeamGeo.translate(0, 0.5, 0);
+  laserBeamGeo.rotateX(Math.PI / 2);
   const laserBeamMat = new THREE.MeshBasicMaterial({
-    color: 0x38e890,
+    color: 0x3ce896,
     transparent: true,
     opacity: 0.0,
     blending: THREE.AdditiveBlending,
@@ -842,6 +1010,20 @@ export function buildTwinTailedScorpion() {
   laserBeamMesh.userData.noAO = true;
   laserBeamMesh.position.set(0.044, -0.042, 0.19);
   eoirBallGroup.add(laserBeamMesh);
+
+  const laserFloorSpotMat = new THREE.MeshBasicMaterial({
+    map: softGlowTex,
+    color: 0x4cffaa,
+    transparent: true,
+    opacity: 0.0,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const laserFloorSpot = new THREE.Mesh(new THREE.PlaneGeometry(0.38, 0.38), laserFloorSpotMat);
+  laserFloorSpot.rotation.x = -Math.PI / 2;
+  laserFloorSpot.position.set(0, 0.006, 5.5);
+  laserFloorSpot.userData.noAO = true;
+  uavRoot.add(laserFloorSpot);
 
   // ============================================================================
   // 3. 20m STRAIGHT-TAPERED HIGH-ASPECT-RATIO LAMINAR WING (NO Airline Winglets!)
@@ -935,17 +1117,15 @@ export function buildTwinTailedScorpion() {
     uavRoot.add(ailPiv);
     fcsSurfaces.ailerons.push({ pivot: ailPiv, side });
 
-    // Prominent Underwing Teardrop Flap-Hinge Fairings (clearly visible in ref_3.jpg!)
+    // Sculpted Streamlined Teardrop Underwing Flap-Hinge Fairings (rounded nose + tapered canoe!)
+    const fairingGeo = buildTeardropFairingGeometry(0.52, 0.036);
     for (const fx of [1.10, 3.08, 5.18, 7.15]) {
       const fy = 1.845 + Math.max(0, fx - 2.38) * 0.021;
-      const fairing = new THREE.Mesh(
-        new THREE.ConeGeometry(0.036, 0.52, 14),
-        mats.boomDarkSlate
-      );
-      fairing.rotation.x = -Math.PI / 2;
-      fairing.scale.set(0.75, 1.0, 1.25);
+      const fairing = new THREE.Mesh(fairingGeo, mats.boomDarkSlate);
+      fairing.scale.set(0.74, 0.92, 1.0);
       fairing.position.set(side * fx, fy, -0.44);
       fairing.castShadow = true;
+      fairing.receiveShadow = true;
       uavRoot.add(fairing);
     }
 
@@ -963,10 +1143,14 @@ export function buildTwinTailedScorpion() {
   // 4. SCULPTED SHARK-NOSE NACELLES, CHEEK BLISTERS, 5 LOUVERS & TWIN BOOMS (ref_3.jpg!)
   // ============================================================================
   const propellers = [];
-  const tailSerialMat = new THREE.MeshBasicMaterial({
+  const tailSerialMat = new THREE.MeshStandardMaterial({
     map: createAircraftMarkingsTexture('tail_serial'),
+    roughness: 0.72,
+    metalness: 0.05,
     transparent: true,
     depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
   });
 
   for (const side of [-1, 1]) {
@@ -1135,22 +1319,111 @@ export function buildTwinTailedScorpion() {
       mainGear.add(chock);
     }
 
-    // Red tubular steel ground-handling hydraulic jack beside starboard main wheel (exact ref_3.jpg!)
+    // Recessed Main Wheel-Well Cavity + Hydraulic Brake Hose & Caliper
+    const mainWell = new THREE.Mesh(
+      new THREE.BoxGeometry(0.34, 0.06, 0.78),
+      mats.cavityBlack
+    );
+    mainWell.position.set(0, 1.43, -0.05);
+    mainGear.add(mainWell);
+
+    const brakeCaliper = new THREE.Mesh(
+      new THREE.BoxGeometry(0.05, 0.11, 0.085),
+      mats.cncDark
+    );
+    brakeCaliper.position.set(-side * 0.04, mainWheelR + 0.03, -0.08);
+    mainGear.add(brakeCaliper);
+
+    const mainHoseCurve = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(-side * 0.02, 1.38, -0.08),
+      new THREE.Vector3(-side * 0.08, 0.96, -0.07),
+      new THREE.Vector3(-side * 0.07, 0.56, -0.07),
+      new THREE.Vector3(-side * 0.04, mainWheelR + 0.05, -0.08),
+    ]);
+    mainGear.add(
+      new THREE.Mesh(new THREE.TubeGeometry(mainHoseCurve, 14, 0.0065, 6, false), mats.tireRubber)
+    );
+
+    // Authentic Red Tubular Steel Tripod Hydraulic Wheel-Jack Stand beside starboard main wheel (exact ref_3.jpg!)
     if (side < 0) {
       const jackFrame = new THREE.Group();
-      jackFrame.position.set(0.18, 0, -0.18);
-      const base = new THREE.Mesh(
-        new THREE.BoxGeometry(0.32, 0.035, 0.42),
+      jackFrame.position.set(0.22, 0, -0.22);
+
+      // 3 angled red tubular tripod legs + horizontal base tie triangle + swivel pads
+      const legR = 0.22;
+      const topY = 0.34;
+      const footPts = [];
+      for (let i = 0; i < 3; i++) {
+        const ang = (i * Math.PI * 2) / 3 + 0.35;
+        const fx = Math.cos(ang) * legR;
+        const fz = Math.sin(ang) * legR;
+        footPts.push(new THREE.Vector3(fx, 0.045, fz));
+
+        const footPad = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.026, 0.030, 0.022, 12),
+          mats.cncDark
+        );
+        footPad.position.set(fx, 0.011, fz);
+        jackFrame.add(footPad);
+
+        const legVec = new THREE.Vector3(-fx * 0.72, topY - 0.02, -fz * 0.72);
+        const legTube = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.011, 0.011, legVec.length(), 10),
+          mats.towJackRed
+        );
+        legTube.position.set(fx + legVec.x * 0.5, 0.02 + legVec.y * 0.5, fz + legVec.z * 0.5);
+        legTube.quaternion.setFromUnitVectors(
+          new THREE.Vector3(0, 1, 0),
+          legVec.clone().normalize()
+        );
+        legTube.castShadow = true;
+        jackFrame.add(legTube);
+      }
+
+      for (let i = 0; i < 3; i++) {
+        const pA = footPts[i];
+        const pB = footPts[(i + 1) % 3];
+        const diff = pB.clone().sub(pA);
+        const tie = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.0085, 0.0085, diff.length(), 8),
+          mats.towJackRed
+        );
+        tie.position.copy(pA).addScaledVector(diff, 0.5);
+        tie.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), diff.clone().normalize());
+        jackFrame.add(tie);
+      }
+
+      // Central hydraulic jack barrel, chrome ram piston, saddle & pump handle
+      const barrel = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.032, 0.036, 0.32, 16),
         mats.towJackRed
       );
-      base.position.y = 0.035;
-      jackFrame.add(base);
-      const cyl = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.036, 0.042, 0.34, 14),
-        mats.towJackRed
+      barrel.position.y = 0.20;
+      barrel.castShadow = true;
+      jackFrame.add(barrel);
+
+      const ram = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.018, 0.018, 0.14, 14),
+        mats.chromeMirror
       );
-      cyl.position.y = 0.20;
-      jackFrame.add(cyl);
+      ram.position.y = 0.40;
+      jackFrame.add(ram);
+
+      const saddle = new THREE.Mesh(
+        new THREE.BoxGeometry(0.068, 0.022, 0.055),
+        mats.cncDark
+      );
+      saddle.position.y = 0.47;
+      jackFrame.add(saddle);
+
+      const pumpHandle = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.007, 0.007, 0.34, 8),
+        mats.brushedSilver
+      );
+      pumpHandle.position.set(0.11, 0.25, 0.06);
+      pumpHandle.rotation.z = -0.62;
+      jackFrame.add(pumpHandle);
+
       mainGear.add(jackFrame);
     }
   }
@@ -1441,8 +1714,33 @@ export function buildTwinTailedScorpion() {
       eoirBallGroup.rotation.x += (pitchT - eoirBallGroup.rotation.x) * dt * 2.8;
     }
 
-    const laserTarget = state.laserDesignatorActive ? 0.22 : 0.0;
+    const laserTarget = state.laserDesignatorActive ? 0.24 : 0.0;
     laserBeamMat.opacity += (laserTarget - laserBeamMat.opacity) * Math.min(1, dt * 8);
+
+    // Dynamically compute exact laser beam ray-floor intersection at y = 0 so it never pierces tarmac!
+    if (laserBeamMat.opacity > 0.004) {
+      eoirBallGroup.updateWorldMatrix(true, false);
+      const originW = new THREE.Vector3(0.044, -0.042, 0.19).applyMatrix4(
+        eoirBallGroup.matrixWorld
+      );
+      const forwardW = new THREE.Vector3(0, 0, 1)
+        .transformDirection(eoirBallGroup.matrixWorld)
+        .normalize();
+      let rayDist = 14.0;
+      if (forwardW.y < -0.015) {
+        rayDist = THREE.MathUtils.clamp(-originW.y / forwardW.y, 0.5, 18.0);
+        const hitW = originW.clone().addScaledVector(forwardW, rayDist);
+        laserFloorSpot.position.set(hitW.x, 0.006, hitW.z);
+        const pulse = 0.85 + 0.15 * Math.sin(elapsed * 22);
+        laserFloorSpot.scale.setScalar(pulse);
+        laserFloorSpotMat.opacity = laserBeamMat.opacity * 2.8;
+      } else {
+        laserFloorSpotMat.opacity = 0;
+      }
+      laserBeamMesh.scale.set(1, 1, rayDist);
+    } else {
+      laserFloorSpotMat.opacity = 0;
+    }
 
     if (state.fcsBitActive) {
       const flapAng = (Math.sin(elapsed * 1.5) * 0.5 + 0.5) * 0.38;

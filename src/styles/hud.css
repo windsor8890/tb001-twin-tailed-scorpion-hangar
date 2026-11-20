@@ -4,9 +4,9 @@
   --bg-hover: rgba(255, 255, 255, 0.055);
   --line-subtle: rgba(255, 255, 255, 0.09);
   --line-mid: rgba(255, 255, 255, 0.18);
-  --ink-primary: #eceef0;
-  --ink-secondary: #929aa4;
-  --ink-muted: #5c646e;
+  --ink-primary: #f0f2f5;
+  --ink-secondary: #aeb6c0;
+  --ink-muted: #7f8894;
   --brass: #c8a464;
   --brass-soft: rgba(200, 164, 100, 0.15);
   --brass-line: rgba(200, 164, 100, 0.55);
@@ -269,17 +269,31 @@ button {
    ============================================================================ */
 .top-bar {
   pointer-events: auto;
-  min-height: 42px;
+  min-height: 40px;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 6px 14px;
-  padding: 6px 14px;
+  gap: 6px 10px;
+  padding: 5px 12px;
   background: var(--bg-glass);
-  backdrop-filter: blur(16px) saturate(115%);
+  backdrop-filter: blur(18px) saturate(120%);
   border: 1px solid var(--line-subtle);
   border-radius: 2px;
+}
+
+.shutter-flash {
+  position: fixed;
+  inset: 0;
+  z-index: 95;
+  background: #ffffff;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.28s ease-out;
+}
+.shutter-flash.flash {
+  opacity: 0.55;
+  transition: none;
 }
 
 .identity-group {
@@ -654,10 +668,12 @@ button {
 
 /* Ground Systems Switches (Left) */
 .sys-strip {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 0 8px;
+  gap: 4px;
+  padding: 0 7px;
+  flex-shrink: 0;
   background: var(--bg-glass);
   backdrop-filter: blur(16px) saturate(115%);
   border: 1px solid var(--line-subtle);
@@ -666,12 +682,13 @@ button {
 
 .sys-switch {
   height: 34px;
-  padding: 0 9px;
+  padding: 0 7px;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   border: 1px solid transparent;
   border-radius: 1px;
+  white-space: nowrap;
   transition: all 0.16s ease;
 }
 
@@ -724,12 +741,18 @@ button {
 }
 
 .rpm-widget {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
   display: none;
-  flex-direction: column;
-  justify-content: center;
-  gap: 3px;
-  width: 68px;
-  padding: 0 4px;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  background: var(--bg-glass-deep);
+  backdrop-filter: blur(14px);
+  border: 1px solid var(--brass-line);
+  border-radius: 2px;
+  pointer-events: none;
 }
 
 .rpm-widget.visible {
@@ -737,9 +760,9 @@ button {
 }
 
 .rpm-bar {
-  width: 100%;
-  height: 2px;
-  background: rgba(255, 255, 255, 0.1);
+  width: 78px;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .rpm-bar-fill {
@@ -750,17 +773,18 @@ button {
 
 #rpm-text {
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: 10px;
   color: var(--brass);
   white-space: nowrap;
 }
 
 /* 6-Hardpoint Underwing Loadout Rail (Center) */
 .pylon-rail {
-  flex: 1;
-  max-width: 620px;
+  flex: 1 1 460px;
+  min-width: 430px;
+  max-width: 610px;
   display: grid;
-  grid-template-columns: repeat(3, 1fr) auto repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto repeat(3, minmax(0, 1fr));
   align-items: stretch;
   background: var(--bg-glass);
   backdrop-filter: blur(16px) saturate(115%);
@@ -775,7 +799,8 @@ button {
   justify-content: center;
   align-items: center;
   gap: 2px;
-  padding: 0 6px;
+  padding: 0 4px;
+  min-width: 0;
   border-right: 1px solid rgba(255, 255, 255, 0.055);
   transition: background 0.16s ease, box-shadow 0.16s ease;
 }
@@ -784,8 +809,9 @@ button {
   border-right: none;
 }
 
-.pylon-slot:hover {
-  background: var(--bg-hover);
+.pylon-slot:hover,
+.pylon-slot.hover-3d {
+  background: rgba(200, 164, 100, 0.11);
 }
 
 .pylon-slot.active {
@@ -796,9 +822,10 @@ button {
 .pylon-head {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   font-family: var(--font-mono);
-  font-size: 9.5px;
+  font-size: 9px;
+  white-space: nowrap;
   color: var(--ink-muted);
 }
 
@@ -812,8 +839,8 @@ button {
 }
 
 .missile-pip {
-  width: 3px;
-  height: 8px;
+  width: 2.5px;
+  height: 7px;
   background: var(--ink-secondary);
   border-radius: 0.5px;
 }
@@ -828,9 +855,9 @@ button {
 
 .pylon-wep {
   font-family: var(--font-cond);
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.04em;
   color: var(--ink-primary);
   white-space: nowrap;
 }
@@ -840,11 +867,12 @@ button {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 0 9px;
+  padding: 0 7px;
   border-right: 1px solid rgba(255, 255, 255, 0.055);
   font-family: var(--font-mono);
-  font-size: 9px;
-  letter-spacing: 0.08em;
+  font-size: 8.5px;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
   color: var(--ink-muted);
   background: rgba(255, 255, 255, 0.02);
 }
@@ -860,6 +888,7 @@ button {
 .camera-rail {
   display: flex;
   align-items: stretch;
+  flex-shrink: 0;
   background: var(--bg-glass);
   backdrop-filter: blur(16px) saturate(115%);
   border: 1px solid var(--line-subtle);
@@ -868,11 +897,11 @@ button {
 }
 
 .cam-tab {
-  padding: 0 12px;
+  padding: 0 9px;
   display: flex;
   align-items: center;
-  gap: 5px;
-  font-size: 11.5px;
+  gap: 4px;
+  font-size: 11px;
   font-weight: 500;
   color: var(--ink-secondary);
   border-right: 1px solid rgba(255, 255, 255, 0.055);
@@ -941,8 +970,19 @@ button {
   pointer-events: none;
 }
 
-@media (max-width: 1320px) {
-  .identity-specs,
+@media (max-width: 1580px) {
+  .identity-specs {
+    display: none;
+  }
+}
+
+@media (max-width: 1460px) {
+  .sys-val {
+    display: none;
+  }
+}
+
+@media (max-width: 1240px) {
   .optics-readout {
     display: none;
   }
